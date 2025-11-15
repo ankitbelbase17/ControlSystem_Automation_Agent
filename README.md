@@ -88,14 +88,33 @@ omc --version
 
 ## Configuration
 
-The project includes pre-configured Azure OpenAI credentials in `config/config.py`:
+### Environment Setup
 
-```python
-AZURE_OPENAI_ENDPOINT = "https://misumi-eastus-2480-openai-test.openai.azure.com/"
-AZURE_OPENAI_API_KEY = "f79ea912919d4b86a65a5c9d4f2baf4d"
-AZURE_OPENAI_API_VERSION = "2024-08-01-preview"
-AZURE_OPENAI_DEPLOYMENT = "GPT-4o-0806"
-```
+The project uses environment variables for secure credential management. Follow these steps:
+
+1. **Copy the template file:**
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Edit `.env` with your Azure OpenAI credentials:**
+   ```env
+   AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
+   AZURE_OPENAI_API_KEY=your-actual-api-key-here
+   AZURE_OPENAI_API_VERSION=2024-08-01-preview
+   AZURE_OPENAI_DEPLOYMENT=GPT-4o-0806
+   ```
+
+3. **Never commit `.env`** - it's protected by `.gitignore`
+
+For detailed setup instructions, see [ENV_SETUP.md](ENV_SETUP.md).
+
+### How It Works
+
+Configuration is loaded dynamically from environment variables:
+- `config/config.py` reads from `.env` using `python-dotenv`
+- All sensitive values are stored locally, never in source code
+- Team members use `.env.example` as a template
 
 ## Usage
 
