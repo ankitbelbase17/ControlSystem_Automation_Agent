@@ -19,13 +19,18 @@ class OMCExecutor:
         Args:
             omc_command: Path to omc executable (uses config default if None)
         """
+        print("[DEBUG] Initializing OMCExecutor...")
         self.omc_command = omc_command or Config.OMC_COMMAND
         self.timeout = Config.SIMULATION_TIMEOUT
+        print(f"[DEBUG] OMC command: {self.omc_command}")
+        print(f"[DEBUG] Simulation timeout: {self.timeout} seconds")
+        print("[✓] OMCExecutor initialized")
         logger.info(f"OMC Executor initialized with command: {self.omc_command}")
     
     def check_omc_available(self) -> bool:
         """Check if OpenModelica is available"""
         try:
+            print(f"[DEBUG] Checking OpenModelica availability using command: {self.omc_command}")
             result = subprocess.run(
                 [self.omc_command, "--version"],
                 capture_output=True,
@@ -33,12 +38,18 @@ class OMCExecutor:
                 timeout=10
             )
             if result.returncode == 0:
-                logger.info(f"OpenModelica version: {result.stdout.strip()}")
+                version_info = result.stdout.strip()
+                print(f"[✓] OpenModelica is available: {version_info}")
+                logger.info(f"OpenModelica version: {version_info}")
                 return True
             else:
+                print(f"[✗] OpenModelica check failed with return code: {result.returncode}")
                 logger.error("OpenModelica not found or not working properly")
                 return False
         except Exception as e:
+            print(f"[✗] Error checking OMC availability: {e}")
+            logger.error(f"Error checking OMC availability: {e}")
+            return False
             logger.error(f"Failed to check OpenModelica: {e}")
             return False
     
@@ -100,29 +111,52 @@ getErrorString();
         logger.info(f"Running simulation script: {mos_file}")
         
         try:
-            # Run the simulation
+            # Extract model name from the script to find result file
+            model_name = None
+            try:
+                with open(mos_file, 'r') as f:
+                    script_content = f.read()
+                # Look for simulate(ModelName, ...) 
+                for line in script_content.split('\n'):
+                    if 'simulate(' in line:
+                        # Extract model name
+                        start = line.find('simulate(') + 9
+                        end = line.find(',', start)
+                        if end > start:
+                            model_name = line[start:end].strip()
+                            break
+            except:
+                pass
+            
+            # Run the simulation using the script file
             result = subprocess.run(
-                [self.omc_command, str(mos_file.absolute())],
+                [self.omc_command, mos_file.name],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                cwd=mos_file.parent
+                cwd=str(mos_file.parent.absolute())
             )
             
             output = result.stdout + result.stderr
             logger.debug(f"Simulation output: {output}")
             
             # Look for the generated .mat file
-            mat_files = list(mos_file.parent.glob("*_res.mat"))
+            if model_name:
+                mat_file = mos_file.parent / f"{model_name}_res.mat"
+                if mat_file.exists():
+                    logger.info(f"Simulation completed. Result file: {mat_file}")
+                    return True, output, mat_file
             
+            # If not found with model name, search for any _res.mat file
+            mat_files = list(mos_file.parent.glob("*_res.mat"))
             if mat_files:
                 mat_file = mat_files[0]
                 logger.info(f"Simulation completed. Result file: {mat_file}")
                 return True, output, mat_file
-            else:
-                logger.warning("Simulation completed but no .mat file found")
-                logger.warning(f"Output: {output}")
-                return False, output, None
+            
+            logger.warning("Simulation completed but no .mat file found")
+            logger.warning(f"Output: {output}")
+            return False, output, None
                 
         except subprocess.TimeoutExpired:
             logger.error(f"Simulation timed out after {self.timeout} seconds")
@@ -154,33 +188,51 @@ getErrorString();
         """
         logger.info(f"Simulating model directly: {model_name}")
         
-        # Create inline simulation commands
-        sim_commands = f"""
-loadFile("{mo_file.absolute()}");
+        work_dir = mo_file.parent.absolute()
+        mo_filename = mo_file.name
+        
+        # Create a proper simulation script
+        script_content = f"""loadFile("{mo_filename}");
 simulate({model_name}, startTime={start_time}, stopTime={stop_time}, numberOfIntervals={num_intervals});
 getErrorString();
 """
         
         try:
+            # Write temporary script
+            temp_script = work_dir / "_temp_sim.mos"
+            with open(temp_script, 'w') as f:
+                f.write(script_content)
+            
+            # Run simulation
             result = subprocess.run(
-                [self.omc_command],
-                input=sim_commands,
+                [self.omc_command, "_temp_sim.mos"],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                cwd=mo_file.parent
+                cwd=str(work_dir)
             )
             
             output = result.stdout + result.stderr
             
             # Look for result file
-            mat_file = mo_file.parent / f"{model_name}_res.mat"
+            mat_file = work_dir / f"{model_name}_res.mat"
             
             if mat_file.exists():
                 logger.info(f"Direct simulation successful: {mat_file}")
+                # Clean up temp script
+                try:
+                    temp_script.unlink()
+                except:
+                    pass
                 return True, output, mat_file
             else:
-                logger.error(f"Simulation failed. Output: {output}")
+                logger.error(f"Simulation failed. No result file found.")
+                logger.error(f"Output: {output}")
+                # Clean up temp script
+                try:
+                    temp_script.unlink()
+                except:
+                    pass
                 return False, output, None
                 
         except subprocess.TimeoutExpired:
