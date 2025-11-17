@@ -18,15 +18,32 @@ cp .env.example .env
 omc --version
 ```
 
-### 2. Interactive Workflow
+### 2. Choose Your Interface
 
+**GUI Mode (Recommended - with Parameter Control)**:
 ```bash
-# Run interactive console mode
-python interactive_workflow.py
-
-# Or run test to verify everything works
-python test_agentic_workflow.py
+python gui_simulator.py
 ```
+- Interactive parameter sliders
+- OMEdit-style visualization
+- Real-time model adjustment
+- See [GUI_SIMULATOR_GUIDE.md](GUI_SIMULATOR_GUIDE.md) for details
+
+**Interactive Console Mode**:
+```bash
+python interactive_workflow.py
+```
+- Step-by-step guided workflow
+- Optional visualization
+- Good for learning the system
+
+**Automated Mode**:
+```bash
+python custom_models.py
+```
+- Pre-configured force-mass-acceleration model
+- Auto-generates and visualizes
+- Good for quick testing
 
 ### 3. Visualize Results
 

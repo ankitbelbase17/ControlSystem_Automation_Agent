@@ -6,9 +6,10 @@ Provides real-time parameter adjustment with immediate re-simulation and visuali
 
 import sys
 import re
+import json
+import numpy as np
 from pathlib import Path
 from datetime import datetime
-import numpy as np
 from tkinter import *
 from tkinter import ttk
 from tkinter import messagebox
@@ -221,9 +222,10 @@ class ModelicaSimulatorGUI:
             ttk.Label(self.params_frame, text="No parameters found in model").pack(padx=10, pady=10)
             return
         
-        ttk.Label(self.params_frame, text="Model Parameters", font=("Arial", 12, "bold")).pack(anchor=W, padx=10, pady=(10, 5))
+        ttk.Label(self.params_frame, text="Model Parameters - Change Values & Watch Live Updates", font=("Arial", 12, "bold")).pack(anchor=W, padx=10, pady=(10, 5))
         
         self.param_vars = {}
+        self.param_labels = {}
         
         for param_name, param_value in self.parameters.items():
             # Determine reasonable range based on value
@@ -231,28 +233,93 @@ class ModelicaSimulatorGUI:
             max_val = param_value * 10
             
             # Frame for each parameter
-            param_frame = ttk.LabelFrame(self.params_frame, text=f"{param_name} = {param_value}", padding=10)
+            param_frame = ttk.LabelFrame(self.params_frame, text=f"{param_name}", padding=10)
             param_frame.pack(padx=10, pady=5, fill=X)
             
             # Variable for this parameter
             self.param_vars[param_name] = DoubleVar(value=param_value)
             
-            # Slider
+            # Slider with real-time update
             scale = Scale(param_frame, from_=min_val, to=max_val, orient=HORIZONTAL, 
                          variable=self.param_vars[param_name],
-                         command=lambda val, name=param_name: self.update_param_label(name, val),
+                         command=lambda val, name=param_name: self.on_parameter_change(name, val),
                          resolution=0.01, length=300)
-            scale.pack(fill=X, expand=True)
+            scale.pack(fill=X, expand=True, padx=5, pady=5)
             
             # Value display
-            self.param_labels = {}
-            self.param_labels[param_name] = ttk.Label(param_frame, text=f"Value: {param_value:.4f}", foreground="blue")
+            self.param_labels[param_name] = ttk.Label(param_frame, text=f"Value: {param_value:.4f}", foreground="blue", font=("Arial", 10, "bold"))
             self.param_labels[param_name].pack(anchor=E, padx=10, pady=5)
     
     def update_param_label(self, param_name, value):
         """Update parameter value display"""
         if hasattr(self, 'param_labels') and param_name in self.param_labels:
             self.param_labels[param_name].config(text=f"Value: {float(value):.4f}")
+    
+    def on_parameter_change(self, param_name, value):
+        """Handle real-time parameter changes"""
+        # Update the label immediately
+        self.update_param_label(param_name, value)
+        
+        # Update display
+        self.update_status(f"Parameter {param_name} = {float(value):.4f} - Updating simulation...", "blue")
+        
+        # Run simulation in background thread with debounce
+        if hasattr(self, '_last_sim_thread') and self._last_sim_thread.is_alive():
+            return  # Skip if simulation already running
+        
+        self._last_sim_thread = threading.Thread(target=self.run_simulation_internal, daemon=True)
+        self._last_sim_thread.start()
+    
+    def run_simulation_internal(self):
+        """Internal simulation runner (called by parameter changes)"""
+        try:
+            if not self.current_model_code or not self.current_model_name:
+                return
+            
+            # Update model with current parameters
+            updated_model = self.current_model_code
+            
+            for param_name, var in self.param_vars.items():
+                current_value = var.get()
+                # Replace parameter value in model
+                pattern = rf'(parameter\s+Real\s+{param_name}\s*=\s*)([\d.]+)'
+                updated_model = re.sub(pattern, rf'\g<1>{current_value}', updated_model)
+            
+            self.current_model_code = updated_model
+            
+            # Save updated model
+            mo_file = self.workspace / f"{self.current_model_name}.mo"
+            with open(mo_file, 'w', encoding='utf-8') as f:
+                f.write(updated_model)
+            
+            # Generate simulation script
+            stop_time = self.stop_time_var.get()
+            intervals = self.intervals_var.get()
+            
+            mos_code = self.agent.generate_simulation_script(self.current_model_name, mo_file)
+            
+            # Customize script with parameters
+            mos_code = mos_code.replace("stopTime=10", f"stopTime={stop_time}")
+            mos_code = mos_code.replace("numberOfIntervals=500", f"numberOfIntervals={intervals}")
+            
+            mos_file = self.workspace / f"simulate_{self.current_model_name}.mos"
+            with open(mos_file, 'w', encoding='utf-8') as f:
+                f.write(mos_code)
+            
+            # Run simulation
+            success, output, mat_file = self.executor.run_simulation_script(mos_file)
+            
+            if success and mat_file:
+                self.current_mat_file = mat_file
+                self.update_status(f"Ready - Updated simulation: {mat_file.name}", "green")
+                
+                # Auto-visualize on parameter change
+                self.visualize_results_internal()
+            else:
+                self.update_status("Simulation failed", "red")
+        
+        except Exception as e:
+            self.update_status(f"Error: {str(e)}", "red")
     
     def run_simulation(self):
         """Run simulation with current parameters"""
@@ -336,6 +403,9 @@ class ModelicaSimulatorGUI:
                 time = data['data_1'].flatten()
                 var_data = data['data_2']
                 
+                # Get variable names from JSON info file
+                var_names = self.get_variable_names_from_json(self.current_mat_file)
+                
                 if len(var_data.shape) > 1:
                     n_vars = var_data.shape[1]
                 else:
@@ -365,11 +435,17 @@ class ModelicaSimulatorGUI:
                         else:
                             x = np.arange(len(y))
                         
+                        # Get proper variable name
+                        if var_names and i < len(var_names):
+                            var_label = var_names[i]
+                        else:
+                            var_label = f'Variable {i}'
+                        
                         # OMEdit style: dark lines, light background
-                        axes[i].plot(x, y, color='#1f77b4', linewidth=1.5, label=f'Var_{i}')
+                        axes[i].plot(x, y, color='#1f77b4', linewidth=1.5, label=var_label)
                         axes[i].grid(True, alpha=0.3, linestyle='--', color='gray')
                         axes[i].set_facecolor('#f8f8f8')
-                        axes[i].set_ylabel(f'Variable {i}', fontsize=10)
+                        axes[i].set_ylabel(var_label, fontsize=10, fontweight='bold')
                         axes[i].legend(loc='upper right', fontsize=8)
                         axes[i].spines['top'].set_visible(False)
                         axes[i].spines['right'].set_visible(False)
@@ -439,6 +515,32 @@ class ModelicaSimulatorGUI:
         
         thread = threading.Thread(target=visualize, daemon=True)
         thread.start()
+    
+    def get_variable_names_from_json(self, mat_file_path):
+        """Extract variable names from the JSON info file"""
+        mat_path = Path(mat_file_path)
+        model_name = mat_path.stem.replace('_res', '')
+        json_file = mat_path.parent / f"{model_name}_info.json"
+        
+        if not json_file.exists():
+            return None
+        
+        try:
+            with open(json_file, 'r') as f:
+                info = json.load(f)
+            
+            variables = info.get('variables', {})
+            # Get only state variables and derivatives (skip parameters)
+            var_names = []
+            for var_name, var_info in variables.items():
+                kind = var_info.get('kind', '')
+                if kind in ['state', 'derivative']:
+                    var_names.append(var_name)
+            
+            return var_names if var_names else None
+        except Exception as e:
+            print(f"Error reading JSON: {e}")
+            return None
 
 
 def main():
