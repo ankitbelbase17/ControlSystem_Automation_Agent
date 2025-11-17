@@ -2,6 +2,7 @@ import sys
 import re
 from pathlib import Path
 from datetime import datetime
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -53,15 +54,17 @@ print("=" * 70)
 # Define the Model Description
 # ============================================================
 description = """
-Create a force-mass-acceleration model:
-- Mass m = 2 kg
-- Applied force F = 10 N (constant)
-- Initial position x = 0 m
-- Initial velocity v = 0 m/s
-- Friction/damping coefficient c = 0.5 N*s/m
-- Output position and velocity over time
+A simple force-mass-acceleration system:
+- Mass m = 1.0 kg
+- Applied force F = 10.0 N (constant)
+- Initial velocity = 0 m/s
+- Initial position = 0 m
 - Simulate for 10 seconds
-Using Newton's second law: F - c*v = m*a, where a = dv/dt and v = dx/dt
+
+The model should have:
+- Parameter for mass and force
+- State variables for position and velocity
+- Differential equations: dv/dt = F/m, dx/dt = v
 """
 
 print(f"\nModel Description:\n{description}\n")
@@ -96,7 +99,7 @@ print(f"[✓] Model name: {actual_model_name}\n")
 print("[INFO] ========================================")
 print("[INFO] STEP 2: SAVING MODEL TO FILE")
 print("[INFO] ========================================")
-model_file_name = "ForceMass"
+model_file_name = "PIsimulator"
 mo_file = workspace / f"{model_file_name}.mo"
 
 print("[DEBUG] Model filename: {}".format(model_file_name))
@@ -256,4 +259,96 @@ if workspace.exists():
 
 print(f"\nCompleted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print("=" * 70)
-print("[✓] SUCCESS! Your MAT file is ready for analysis!")
+print("[OK] SUCCESS! Your MAT file is ready for analysis!")
+print("=" * 70)
+
+# ============================================================
+# STEP 7: VISUALIZE RESULTS
+# ============================================================
+print("\n[INFO] ========================================")
+print("[INFO] STEP 7: VISUALIZING RESULTS")
+print("[INFO] ========================================")
+
+try:
+    from scipy.io import loadmat
+    import matplotlib.pyplot as plt
+    
+    print("[DEBUG] Loading MAT file for visualization...")
+    data = loadmat(str(mat_file))
+    
+    print("[DEBUG] MAT file keys available:")
+    for key in data.keys():
+        if not key.startswith('__'):
+            print(f"  - {key}")
+    
+    # OpenModelica uses data_1 (time) and data_2 (variables)
+    if 'data_1' in data and 'data_2' in data:
+        print("[DEBUG] Using OpenModelica MAT format (data_1, data_2)")
+        time = data['data_1'].flatten()
+        var_data = data['data_2']
+        
+        print(f"[DEBUG] Time points: {len(time)}")
+        print(f"[DEBUG] Variables shape: {var_data.shape}")
+        
+        # Create subplots for each variable
+        if len(var_data.shape) > 1:
+            n_vars = var_data.shape[1]  # Variables are in columns
+        else:
+            n_vars = 1
+        
+        if n_vars > 1:
+            fig, axes = plt.subplots(min(n_vars, 5), 1, figsize=(12, 3*min(n_vars, 5)))
+        else:
+            fig, axes = plt.subplots(1, 1, figsize=(12, 4))
+            axes = [axes]
+        
+        print(f"[DEBUG] Creating {min(n_vars, 5)} subplots...")
+        
+        # Plot each variable (limit to first 5 for clarity)
+        for i in range(min(n_vars, 5)):
+            if len(var_data.shape) > 1:
+                y = var_data[:, i]  # Get column i
+            else:
+                y = var_data.flatten()
+            
+            # Use time if lengths match, otherwise use indices
+            if len(time) == len(y):
+                x_axis = time
+                x_label = 'Time (s)'
+            else:
+                x_axis = np.arange(len(y))
+                x_label = 'Index'
+                print(f"[DEBUG] Note: Time length ({len(time)}) != Data length ({len(y)}), using indices")
+            
+            axes[i].plot(x_axis, y, 'b-', linewidth=2)
+            axes[i].fill_between(x_axis, y, alpha=0.2)
+            axes[i].set_ylabel(f'Variable {i}', fontsize=11)
+            axes[i].grid(True, alpha=0.3)
+        
+        axes[-1].set_xlabel(x_label, fontsize=11)
+        plt.suptitle(f'Simulation Results: {actual_model_name}', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        # Save plot
+        plot_file = workspace / f"{actual_model_name}_visualization.png"
+        plt.savefig(plot_file, dpi=150, bbox_inches='tight')
+        print(f"[OK] Plot saved: {plot_file}")
+        print(f"[DEBUG] Plot size: {plot_file.stat().st_size} bytes")
+        
+        # Show plot
+        plt.show()
+        print("[OK] Visualization complete!")
+        
+    else:
+        print("[WARNING] MAT file format not recognized. Expected data_1 and data_2.")
+        print("[INFO] You can visualize manually using: python visualize_mat.py")
+        
+except Exception as e:
+    print(f"[WARNING] Could not create visualization: {e}")
+    print("[INFO] MAT file was generated successfully. You can visualize it using:")
+    print(f"[INFO] python visualize_mat.py \"{mat_file}\"")
+    import traceback
+    print(f"[DEBUG] Error details: {traceback.format_exc()}")
+
+print("\n" + "=" * 70)
+sys.exit(0)

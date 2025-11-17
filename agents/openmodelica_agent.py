@@ -30,10 +30,10 @@ class OpenModelicaAgent(BaseAgent):
                 api_version=Config.AZURE_OPENAI_API_VERSION,
                 azure_endpoint=Config.AZURE_OPENAI_ENDPOINT
             )
-            print("[✓] Azure OpenAI client initialized successfully")
+            print("[OK] Azure OpenAI client initialized successfully")
             logger.info("Azure OpenAI client initialized successfully")
         except Exception as e:
-            print(f"[✗] Failed to initialize Azure OpenAI: {e}")
+            print(f"[FAIL] Failed to initialize Azure OpenAI: {e}")
             logger.error(f"Failed to initialize Azure OpenAI: {e}")
             self.client = None
     
@@ -49,7 +49,7 @@ class OpenModelicaAgent(BaseAgent):
             Response text or None if failed
         """
         if not self.client:
-            print("[✗] Azure OpenAI client not initialized")
+            print("[FAIL] Azure OpenAI client not initialized")
             logger.error("Azure OpenAI client not initialized")
             return None
         
@@ -81,12 +81,12 @@ class OpenModelicaAgent(BaseAgent):
             )
             
             result = response.choices[0].message.content
-            print(f"[✓] Received response from Azure OpenAI ({len(result)} chars)")
+            print(f"[OK] Received response from Azure OpenAI ({len(result)} chars)")
             logger.info("Successfully received response from Azure OpenAI")
             return result
             
         except Exception as e:
-            print(f"[✗] Azure OpenAI API call failed: {e}")
+            print(f"[FAIL] Azure OpenAI API call failed: {e}")
             logger.error(f"Azure OpenAI API call failed: {e}")
             return None
     
@@ -164,7 +164,7 @@ No markdown, no backticks, no explanations - just the code starting with 'model'
                 else:
                     break
             
-            print(f"[✓] Model generation successful ({len(response)} chars final)")
+            print(f"[OK] Model generation successful ({len(response)} chars final)")
             self.add_to_history(f"Generate model: {description[:100]}...", response[:200])
             logger.info("Model generation successful")
             return response

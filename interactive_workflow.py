@@ -6,6 +6,7 @@ User interacts directly without needing to create a file
 
 import sys
 import re
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 
@@ -262,46 +263,75 @@ def interactive_workflow():
             print("[DEBUG] Loading MAT file...")
             data = loadmat(str(mat_file))
             
-            print("[DEBUG] Available variables:")
+            print("[DEBUG] MAT file keys:")
             for key in data.keys():
                 if not key.startswith('__'):
                     print(f"  - {key}")
             
-            # Create plots if time and states exist
-            if 'time' in data:
-                print("[DEBUG] Creating plots...")
-                time = data['time'].flatten()
+            # OpenModelica uses data_1 (time) and data_2 (variables)
+            if 'data_1' in data and 'data_2' in data:
+                print("[DEBUG] Using OpenModelica MAT format (data_1, data_2)")
+                time = data['data_1'].flatten()
+                var_data = data['data_2']
                 
-                # Plot available variables
-                fig, axes = plt.subplots(len([k for k in data.keys() if not k.startswith('__')]) - 1, 1)
-                if not isinstance(axes, list):
+                print(f"[DEBUG] Time points: {len(time)}")
+                print(f"[DEBUG] Variables shape: {var_data.shape}")
+                
+                # Create subplots for each variable
+                if len(var_data.shape) > 1:
+                    n_vars = var_data.shape[1]  # Variables are in columns
+                else:
+                    n_vars = 1
+                
+                if n_vars > 1:
+                    fig, axes = plt.subplots(min(n_vars, 5), 1, figsize=(12, 3*min(n_vars, 5)))
+                else:
+                    fig, axes = plt.subplots(1, 1, figsize=(12, 4))
                     axes = [axes]
                 
-                plot_idx = 0
-                for key in data.keys():
-                    if not key.startswith('__') and key != 'time':
-                        try:
-                            var_data = data[key].flatten()
-                            if len(var_data) == len(time):
-                                axes[plot_idx].plot(time, var_data, 'b-', linewidth=2)
-                                axes[plot_idx].set_ylabel(key, fontsize=12)
-                                axes[plot_idx].grid(True, alpha=0.3)
-                                plot_idx += 1
-                        except:
-                            pass
+                print(f"[DEBUG] Creating {n_vars} subplots (limited to 5 for visibility)...")
                 
-                axes[-1].set_xlabel('Time (s)', fontsize=12)
+                # Plot each variable (limit to first 5 for clarity)
+                for i in range(min(n_vars, 5)):
+                    if len(var_data.shape) > 1:
+                        y = var_data[:, i]  # Get column i
+                    else:
+                        y = var_data.flatten()
+                    
+                    # Use time if lengths match, otherwise use indices
+                    if len(time) == len(y):
+                        x_axis = time
+                        x_label = 'Time (s)'
+                    else:
+                        x_axis = np.arange(len(y))
+                        x_label = 'Index'
+                        print(f"[DEBUG] Note: Time array length ({len(time)}) != Data length ({len(y)}), using indices")
+                    
+                    axes[i].plot(x_axis, y, 'b-', linewidth=2)
+                    axes[i].fill_between(x_axis, y, alpha=0.2)
+                    axes[i].set_ylabel(f'Variable {i}', fontsize=11)
+                    axes[i].grid(True, alpha=0.3)
+                
+                axes[-1].set_xlabel(x_label, fontsize=11)
                 plt.suptitle(f'Simulation Results: {actual_model_name}', fontsize=14, fontweight='bold')
                 plt.tight_layout()
                 
                 plot_file = workspace / f"{model_file_name}_plot.png"
                 plt.savefig(plot_file, dpi=150, bbox_inches='tight')
-                print(f"[DEBUG] Plot saved: {plot_file}")
-                print("[STEP 8] ✓ Visualization complete\n")
+                print(f"[DEBUG] OK Plot saved: {plot_file}")
+                print(f"[DEBUG] Plot size: {plot_file.stat().st_size} bytes")
+                print("[STEP 8] OK Visualization complete\n")
                 
                 plt.show()
+            else:
+                print("[WARNING] MAT file format not recognized. Expected data_1 and data_2.")
+                print("[INFO] You can visualize manually using: python visualize_mat.py")
+                
         except Exception as e:
-            print(f"[WARNING] Could not visualize: {e}\n")
+            print(f"[WARNING] Could not visualize: {e}")
+            print("[INFO] You can visualize manually using: python visualize_mat.py")
+            import traceback
+            print(f"[DEBUG] Traceback: {traceback.format_exc()}\n")
     
     print("[INFO] Workflow complete!")
     print(f"[INFO] All files saved in: {workspace}\n")
